@@ -1,9 +1,20 @@
-#include <dirent.h>
 #include <iostream>
 #include <filesystem>
 #include <string>
 #include <fstream>
-#include <unistd.h>
+#include <thread>
+#include <mutex>
+#include <vector>
+
+#define THREAD_COUNT 3
+static std::atomic<size_t> error_counter{};
+static std::atomic<size_t> js_counter{};
+static std::atomic<size_t> unix_counter{};
+static std::atomic<size_t> macOS_counter{};
+static std::atomic<size_t> file_counter{};
+
+static std::atomic<int> thread_counter = THREAD_COUNT;
+static std::mutex m{};
 
 enum sus_types
 {
@@ -13,6 +24,56 @@ enum sus_types
     maxOS
 };
 
+sus_types is_sus(const std::string &str);
+
+void threadFunction(const std::filesystem::path &path)
+{
+    std::unique_lock<std::mutex> unique_lock_m(m);
+    --thread_counter;
+    if (thread_counter.load())
+    {
+        unique_lock_m.unlock();
+    }
+
+    std::ifstream file{path};
+
+    if (!file.is_open())
+    {
+        ++error_counter;
+        ++thread_counter;
+        return;
+    }
+
+    std::string line;
+    bool find_any = false;
+    auto extension = path.extension().string();
+    while (getline(file, line) && !find_any)
+    {
+        auto result = is_sus(line);
+        switch (result)
+        {
+            case sus_types::js:
+                if (extension == ".js")
+                {
+                    find_any = true;
+                    ++js_counter;
+                }
+                break;
+            case sus_types::maxOS:
+                find_any = true;
+                ++macOS_counter;
+                break;
+            case sus_types::unix:
+                find_any = true;
+                ++unix_counter;
+                break;
+            default:
+                break;
+        }
+    }
+
+    ++thread_counter;
+}
 
 sus_types is_sus(const std::string &str)
 {
@@ -33,81 +94,46 @@ sus_types is_sus(const std::string &str)
     return NONE;
 }
 
+
 int main(int argc, char *argv[])
 {
-    auto start{std::chrono::high_resolution_clock::now()};
-    auto time_start = clock();
+    std::chrono::time_point start_time{std::chrono::high_resolution_clock::now()};
+
     if (argc != 2)
     {
         std::cerr << "wrong param count, expected path only\n";
         return -1;
     }
 
-
     std::filesystem::path path{argv[1]};
-    std::cout << argv[1] << std::endl;
     if (!std::filesystem::exists(path))
     {
-
         std::cerr << "this catalog doesn't exists\n";
         return -1;
     }
 
-    size_t error_counter{};
-    size_t js_counter{};
-    size_t unix_counter{};
-    size_t macOS_counter{};
-    size_t file_counter{};
-    std::string line;
-
+    std::vector<std::thread *> vec{};
     for (const auto &iter : std::filesystem::directory_iterator{path})
     {
         ++file_counter;
-        std::ifstream file{iter.path()};
-        if (!file.is_open())
-        {
-            ++error_counter;
-            continue;
-        }
-        bool find_any = false;
-        auto extension = iter.path().extension().string();
-        while (getline(file, line) && !find_any)
-        {
-            auto result = is_sus(line);
-            switch (result)
-            {
-                case sus_types::js:
-                    if (extension == ".js")
-                    {
-                        find_any = true;
-                        ++js_counter;
-                    }
-                    break;
-                case sus_types::maxOS:
-                    find_any = true;
-                    ++macOS_counter;
-                    break;
-                case sus_types::unix:
-                    find_any = true;
-                    ++unix_counter;
-                    break;
-            }
-        }
+        auto *tmp = new std::thread(threadFunction, iter.path());
+        vec.emplace_back(tmp);
     }
+    for (auto thr : vec)
+        if (thr->joinable())
+            thr->join();
 
-    auto duration{std::chrono::high_resolution_clock::now() - start};
-    auto time_end = clock();
+    auto duration{std::chrono::high_resolution_clock::now() - start_time};
+    auto duration_s = std::chrono::duration_cast<std::chrono::seconds>(duration).count();
+    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count() % 1000;
+    auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(duration).count() % 1000;
 
-
-    std::cout << "====== Scan result ======" << std::endl;
-    std::cout << "Processed files: " << file_counter << std::endl;
-    std::cout << "JS detects: " << js_counter << std::endl;
-    std::cout << "Unix detects: " << unix_counter << std::endl;
-    std::cout << "macOS detects: " << macOS_counter << std::endl;
-    std::cout << "Errors: " << error_counter << std::endl;
-    std::cout << "Exection time: " << ((double) time_end - (double) time_start) / (double) CLOCKS_PER_SEC << std::endl;
-    printf("%.4f\n", ((double) time_start - time_end) / CLOCKS_PER_SEC);
-    std::cout << (double) duration.count() / 1000000000 << std::endl;
-    std::cout << "=========================\n" << std::endl;
-
+    printf("========== Scan result ==========\n");
+    printf("Processed files: %zu\n", file_counter.load());
+    printf("JS detects: %zu\n", js_counter.load());
+    printf("Unix detects: %zu\n", unix_counter.load());
+    printf("macOS detects: %zu\n", macOS_counter.load());
+    printf("Errors: %zu\n", error_counter.load());
+    printf("Exection time: %02llds:%02lldms:%02lldus\n", duration_s, duration_ms, duration_us);
+    std::cout << "=================================\n" << std::endl;
 }
