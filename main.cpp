@@ -50,14 +50,10 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    if (!std::ifstream{path}.is_open())
     {
-        // Hello from RAII
-        std::ifstream dir{path};
-        if (!dir.is_open())
-        {
-            fprintf(stderr, "operation not permitted for directory: %s\n", path.string().c_str());
-            return 6;
-        }
+        fprintf(stderr, "operation not permitted for directory: %s\n", path.string().c_str());
+        return 6;
     }
 
     for (const auto &iter : std::filesystem::directory_iterator{path})
@@ -69,6 +65,7 @@ int main(int argc, char *argv[])
         --available_threads_counter;
         thread_vector.emplace_back(std::thread(check_file, iter.path()));
     }
+
     for (auto &thr : thread_vector)
         thr.join();
 
@@ -118,7 +115,7 @@ void check_file(const std::filesystem::path &path)
     }
 
     std::string line;
-    std::string extension = path.extension().string();
+    const std::string &extension = path.extension().string();
     while (getline(file, line))
     {
         auto result = suspicion_check(line, extension);
