@@ -6,7 +6,6 @@
 #include <vector>
 #include <condition_variable>
 #include <atomic>
-#include <iostream>
 
 #define THREAD_COUNT 3
 #define SUS_TYPE_COUNT 3
