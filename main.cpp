@@ -31,6 +31,7 @@ static std::condition_variable cv{};
 
 int main(int argc, char *argv[])
 {
+    printf("");
     auto start_time{std::chrono::high_resolution_clock::now()};
     size_t file_counter{};
     std::mutex m{};
